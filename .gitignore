@@ -1,0 +1,14 @@
+# Ignorar datos locales y logs
+data/
+debug/
+*.log
+
+# Ignorar archivos generados por Python
+__pycache__/
+*.pyc
+
+# Ignorar entornos virtuales (si usas uno localmente)
+venv/
+env/
+
+src/config.py
