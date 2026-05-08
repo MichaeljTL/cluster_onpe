@@ -2,9 +2,17 @@ import os
 import json
 import re
 import html
+import subprocess
 from operator import itemgetter
 import requests
+import boto3
 
+# Importamos las variables de tu configuración
+from config import REGION, USUARIO_SSH
+
+# ==============================================================================
+# CONFIGURACIÓN BASE
+# ==============================================================================
 BASE_URL = "https://resultadoelectoral.onpe.gob.pe/presentacion-backend"
 ID_ELECCION = 10 # id de las elecciones presidenciales, diputados, senadores y parlamento andino
 ID_AMBITO_GEOGRAFICO = 1
@@ -29,6 +37,34 @@ HEADERS = {
 session = requests.Session()
 session.headers.update(HEADERS)
 
+# ==============================================================================
+# 1. AUTO-DESCUBRIMIENTO EN AWS
+# ==============================================================================
+def obtener_ips_workers():
+    """Consulta a AWS las IPs privadas de las instancias etiquetadas como HadoopWorker"""
+    print("\n[+] Consultando a AWS por los nodos Workers activos...")
+    try:
+        ec2 = boto3.client('ec2', region_name=REGION) 
+        respuesta = ec2.describe_instances(
+            Filters=[
+                {'Name': 'tag:Rol', 'Values': ['HadoopWorker']},
+                {'Name': 'instance-state-name', 'Values': ['running']}
+            ]
+        )
+        
+        ips_workers = []
+        for reservacion in respuesta['Reservations']:
+            for instancia in reservacion['Instances']:
+                ips_workers.append(instancia['PrivateIpAddress'])
+                
+        return ips_workers
+    except Exception as e:
+        print(f"Error al conectar con AWS: {e}")
+        return []
+
+# ==============================================================================
+# 2. FUNCIONES DE EXTRACCIÓN ONPE
+# ==============================================================================
 def inicializar_sesion():
     try:
         r = session.get("https://resultadoelectoral.onpe.gob.pe/main/resumen", timeout=30)
@@ -71,7 +107,7 @@ def get_json(endpoint, params=None):
         response = session.get(url, params=params, timeout=30)
         response.encoding = "utf-8"
         
-        # Agregamos los prints de debug igual que en tu crawler
+        # Agregamos los prints de debug
         print(f"GET: {response.url}")
         print(f"STATUS: {response.status_code}")
         print(f"PREVIEW: {response.text[:100].replace(chr(10), ' ')}")
@@ -141,12 +177,23 @@ def distribuir_carga_lpt(pesos_deptos, num_workers):
         
     return workers
 
+# ==============================================================================
+# 3. EJECUCIÓN PRINCIPAL Y DISPATCH REMOTO
+# ==============================================================================
 def main():
-    NUM_WORKERS = 20
+    print("="*60)
+    print("ORQUESTADOR ONPE - DESPLIEGUE AUTOMÁTICO EN AWS")
+    print("="*60)
     
-    print("="*60)
-    print("ORQUESTADOR ONPE - ASIGNACIÓN DE CARGA")
-    print("="*60)
+    # 1. Ya no forzamos NUM_WORKERS, AWS nos dice cuántos hay encendidos
+    lista_ips = obtener_ips_workers()
+    NUM_WORKERS = len(lista_ips)
+    
+    if NUM_WORKERS == 0:
+        print("\nError: No se encontraron Nodos Workers activos en AWS.")
+        return
+
+    print(f"\nSe encontraron {NUM_WORKERS} Workers listos para recibir órdenes.")
     
     inicializar_sesion()
     
@@ -157,24 +204,45 @@ def main():
         
     distribucion = distribuir_carga_lpt(pesos, NUM_WORKERS)
     
-    print("\n" + "="*60)
-    print("PLAN DE DISTRIBUCIÓN FINAL")
-    print("="*60)
-    
-    for w in distribucion:
-        nombres_deps = [d["nombre"] for d in w["departamentos"]]
-        ubigeos_deps = [d["ubigeo"] for d in w["departamentos"]]
-        
-        print(f"\nWorker {w['id']} | Carga Total Asignada: {w['carga_total']} unidades")
-        print(f"Departamentos: {', '.join(nombres_deps)}")
-        
-        parametro_ubigeos = ",".join(ubigeos_deps)
-        print(f"-> Comando a ejecutar en EC2 Worker {w['id']}:")
-        print(f"   python crawler.py --ubigeos {parametro_ubigeos}")
-
+    # Guardamos el plan localmente por si necesitamos auditarlo después
     with open("distribucion_cluster.json", "w", encoding="utf-8") as f:
         json.dump(distribucion, f, indent=2, ensure_ascii=False)
-    print("\nPlan de distribución guardado en 'distribucion_cluster.json'")
+    
+    print("\n" + "="*60)
+    print("DISTRIBUYENDO CÓDIGO Y LANZANDO PROCESOS ")
+    print("="*60)
+    
+    # 2. Bucle mágico: Conectamos a cada IP y le damos la orden
+    for w, ip_worker in zip(distribucion, lista_ips):
+        id_worker = w['id']
+        nombres_deps = [d["nombre"] for d in w["departamentos"]]
+        ubigeos_deps = [d["ubigeo"] for d in w["departamentos"]]
+        parametro_ubigeos = ",".join(ubigeos_deps)
+        
+        print(f"\n[+] Worker {id_worker} | Carga: {w['carga_total']} | IP: {ip_worker}")
+        print(f"    Asignación: {', '.join(nombres_deps)}")
+        
+        ruta_script_remota = f"/home/{USUARIO_SSH}/ONPE-CONSULTA/src/worker_descarga.py"
+        
+        # A) Crear carpeta en el worker (por si acaso no existe)
+        subprocess.run(["ssh", "-o", "StrictHostKeyChecking=no", f"{USUARIO_SSH}@{ip_worker}", f"mkdir -p /home/{USUARIO_SSH}/ONPE-CONSULTA/src"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        # B) Copiarle el script al worker (garantiza que siempre corra tu última versión)
+        print("    -> Sincronizando script...")
+        subprocess.run(["scp", "-o", "StrictHostKeyChecking=no", "src/worker_descarga.py", f"{USUARIO_SSH}@{ip_worker}:{ruta_script_remota}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        # C) Ejecutar el script en segundo plano activando el guardado en HDFS
+        print("    -> Iniciando descarga masiva...")
+        comando_ssh = [
+            "ssh", "-o", "StrictHostKeyChecking=no", f"{USUARIO_SSH}@{ip_worker}",
+            f"nohup python3 {ruta_script_remota} --ubigeos {parametro_ubigeos} --storage hdfs > /home/{USUARIO_SSH}/worker_{id_worker}.log 2>&1 &"
+        ]
+        subprocess.Popen(comando_ssh)
+
+    print("\n" + "="*60)
+    print("¡TODOS LOS WORKERS HAN SIDO DESPLEGADOS!")
+    print("Las máquinas están trabajando en segundo plano y subirán todo a Hadoop al terminar.")
+    print("="*60)
 
 if __name__ == "__main__":
     main()
