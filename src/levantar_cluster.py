@@ -2,15 +2,34 @@ import boto3
 import time
 import argparse
 import sys
+import os
 import subprocess
 
+
 # Importamos las variables globales desde nuestro archivo config.py
-from src.config import REGION, AMI_ID, KEY_NAME, SECURITY_GROUP_ID, SUBNET_ID, TIPO_INSTANCIA, USUARIO_SSH
+from config import REGION, AMI_ID, KEY_NAME, SECURITY_GROUP_ID, SUBNET_ID, TIPO_INSTANCIA, USUARIO_SSH
 
 ec2_resource = boto3.resource('ec2', region_name=REGION)
 
 def levantar_workers(cantidad):
     """Crea la cantidad especificada de instancias EC2 y les inyecta el User Data."""
+
+    # =========================================================
+    # [NUEVA LÓGICA] Generar y leer la llave SSH del Maestro
+    # =========================================================
+    archivo_llave = "/home/ec2-user/.ssh/id_rsa"
+    
+    # Si el Maestro no tiene llave propia, la crea sin pedir contraseña
+    if not os.path.exists(archivo_llave):
+        print("🔑 Generando llave SSH interna para el clúster...")
+        subprocess.run(["ssh-keygen", "-t", "rsa", "-N", "", "-f", archivo_llave], check=True)
+        
+    # Leemos la llave pública del Maestro
+    with open(f"{archivo_llave}.pub", "r") as f:
+        llave_publica_maestro = f.read().strip()
+    # =========================================================
+
+    # Tu User Data original (sin usar f-strings para no romper el bash)
     
     user_data_script = """#!/bin/bash
 # ==========================================
@@ -146,6 +165,15 @@ mkdir -p /home/ec2-user/hadoop-3.3.6/hdfs/datanode
 chown -R ec2-user:ec2-user /home/ec2-user/hadoop-3.3.6
 chown ec2-user:ec2-user /home/ec2-user/.bashrc
 """
+
+    # =========================================================
+    # [NUEVA LÓGICA] Inyectar la llave al final del script bash
+    # =========================================================
+    user_data_script += f"\n# Autorizar al Maestro\n"
+    user_data_script += f"echo '{llave_publica_maestro}' >> /home/ec2-user/.ssh/authorized_keys\n"
+    user_data_script += f"chmod 600 /home/ec2-user/.ssh/authorized_keys\n"
+    user_data_script += f"chown ec2-user:ec2-user /home/ec2-user/.ssh/authorized_keys\n"
+    # =========================================================
 
     print(f"Solicitando {cantidad} instancias Worker a AWS...")
     
