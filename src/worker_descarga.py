@@ -108,6 +108,17 @@ class StorageManager:
         return data, True
 
     def obtener_ultima_pagina_actas_checkpoint(self, ubigeo_distrito):
+        # Fast path: pequeño índice con la última página válida.
+        ruta_checkpoint = f"raw/actas/checkpoints/{ubigeo_distrito}.json"
+        checkpoint = self.cargar_json_si_existe(ruta_checkpoint)
+
+        if isinstance(checkpoint, dict):
+            ultima_pagina = checkpoint.get("ultima_pagina")
+
+            if isinstance(ultima_pagina, int) and ultima_pagina >= 0:
+                return ultima_pagina
+
+        # Fallback para ejecuciones antiguas que no tenían índice.
         directorio = self.local_path("raw/actas/listado")
 
         if not os.path.isdir(directorio):
@@ -141,12 +152,36 @@ class StorageManager:
 
         return ultima_pagina
 
+    def guardar_ultima_pagina_actas_checkpoint(self, ubigeo_distrito, pagina):
+        if not isinstance(pagina, int) or pagina < 0:
+            return
+
+        self.guardar_json(
+            f"raw/actas/checkpoints/{ubigeo_distrito}.json",
+            {
+                "ubigeo_distrito": ubigeo_distrito,
+                "ultima_pagina": pagina,
+                "actualizado_en": datetime.now().isoformat()
+            }
+        )
+
     def append_jsonl(self, relative_path, registro):
         self.mkdir_parent(relative_path)
         path = self.local_path(relative_path)
 
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(registro, ensure_ascii=False) + "\n")
+
+    def append_jsonl_many(self, relative_path, registros):
+        if not registros:
+            return
+
+        self.mkdir_parent(relative_path)
+        path = self.local_path(relative_path)
+
+        with open(path, "a", encoding="utf-8") as f:
+            for registro in registros:
+                f.write(json.dumps(registro, ensure_ascii=False) + "\n")
 
     def guardar_texto(self, relative_path, texto):
         self.mkdir_parent(relative_path)
@@ -495,6 +530,7 @@ def obtener_actas_distrito(ubigeo_distrito, storage, sleep_time):
         if existente is not None:
             print(f"Página ya existente, usando checkpoint: {ruta_pagina}")
             data = existente
+            storage.guardar_ultima_pagina_actas_checkpoint(ubigeo_distrito, pagina)
         else:
             params = {
                 "pagina": pagina,
@@ -515,6 +551,7 @@ def obtener_actas_distrito(ubigeo_distrito, storage, sleep_time):
                 break
 
             storage.guardar_json(ruta_pagina, data)
+            storage.guardar_ultima_pagina_actas_checkpoint(ubigeo_distrito, pagina)
             pagina_descargada = True
 
         payload = data.get("data", {})
@@ -863,6 +900,7 @@ def ejecutar_worker(
 
         provincias_raw = obtener_provincias(dep["ubigeo"], storage)
         provincias = []
+        filas_provincias = []
 
         for p in provincias_raw:
             prov = {
@@ -871,15 +909,17 @@ def ejecutar_worker(
             }
             provincias.append(prov)
 
-            storage.append_jsonl(
-                "processed/provincias_por_departamento.jsonl",
-                {
-                    "ubigeo_departamento": dep["ubigeo"],
-                    "nombre_departamento": dep["nombre"],
-                    "ubigeo_provincia": prov["ubigeo"],
-                    "nombre_provincia": prov["nombre"]
-                }
-            )
+            filas_provincias.append({
+                "ubigeo_departamento": dep["ubigeo"],
+                "nombre_departamento": dep["nombre"],
+                "ubigeo_provincia": prov["ubigeo"],
+                "nombre_provincia": prov["nombre"]
+            })
+
+        storage.append_jsonl_many(
+            "processed/provincias_por_departamento.jsonl",
+            filas_provincias
+        )
 
         contadores["provincias"] += len(provincias)
 
@@ -891,6 +931,7 @@ def ejecutar_worker(
 
             distritos_raw = obtener_distritos(prov["ubigeo"], storage)
             distritos = []
+            filas_distritos = []
 
             for d in distritos_raw:
                 dist = {
@@ -899,18 +940,20 @@ def ejecutar_worker(
                 }
                 distritos.append(dist)
 
-                storage.append_jsonl(
-                    "processed/distritos_por_provincia.jsonl",
-                    {
-                        "ubigeo_departamento": dep["ubigeo"],
-                        "nombre_departamento": dep["nombre"],
-                        "ubigeo_provincia": prov["ubigeo"],
-                        "nombre_provincia": prov["nombre"],
-                        "ubigeo_distrito": dist["ubigeo"],
-                        "nombre_distrito": dist["nombre"],
-                        "longitud_ubigeo_distrito": len(dist["ubigeo"])
-                    }
-                )
+                filas_distritos.append({
+                    "ubigeo_departamento": dep["ubigeo"],
+                    "nombre_departamento": dep["nombre"],
+                    "ubigeo_provincia": prov["ubigeo"],
+                    "nombre_provincia": prov["nombre"],
+                    "ubigeo_distrito": dist["ubigeo"],
+                    "nombre_distrito": dist["nombre"],
+                    "longitud_ubigeo_distrito": len(dist["ubigeo"])
+                })
+
+            storage.append_jsonl_many(
+                "processed/distritos_por_provincia.jsonl",
+                filas_distritos
+            )
 
             contadores["distritos"] += len(distritos)
 
@@ -926,20 +969,24 @@ def ejecutar_worker(
                 locales = obtener_locales_distrito(dist["ubigeo"], storage)
                 contadores["locales"] += len(locales)
 
+                filas_locales = []
+
                 for local in locales:
-                    storage.append_jsonl(
-                        "processed/locales_por_distrito.jsonl",
-                        {
-                            "ubigeo_departamento": dep["ubigeo"],
-                            "nombre_departamento": dep["nombre"],
-                            "ubigeo_provincia": prov["ubigeo"],
-                            "nombre_provincia": prov["nombre"],
-                            "ubigeo_distrito": dist["ubigeo"],
-                            "nombre_distrito": dist["nombre"],
-                            "codigo_local_votacion": local.get("codigoLocalVotacion"),
-                            "nombre_local_votacion": local.get("nombreLocalVotacion")
-                        }
-                    )
+                    filas_locales.append({
+                        "ubigeo_departamento": dep["ubigeo"],
+                        "nombre_departamento": dep["nombre"],
+                        "ubigeo_provincia": prov["ubigeo"],
+                        "nombre_provincia": prov["nombre"],
+                        "ubigeo_distrito": dist["ubigeo"],
+                        "nombre_distrito": dist["nombre"],
+                        "codigo_local_votacion": local.get("codigoLocalVotacion"),
+                        "nombre_local_votacion": local.get("nombreLocalVotacion")
+                    })
+
+                storage.append_jsonl_many(
+                    "processed/locales_por_distrito.jsonl",
+                    filas_locales
+                )
 
                 # -----------------------------
                 # Listado de actas
@@ -995,53 +1042,41 @@ def ejecutar_worker(
                             )
 
                         votos = extraer_votos_detalle_acta(detalle_acta)
+                        votos_con_contexto = [
+                            agregar_contexto_geografico(voto, dep, prov, dist)
+                            for voto in votos
+                        ]
 
-                        for voto in votos:
-                            voto = agregar_contexto_geografico(
-                                voto,
-                                dep,
-                                prov,
-                                dist
-                            )
-
-                            storage.append_jsonl(
-                                "processed/actas_detalle_votos.jsonl",
-                                voto
-                            )
+                        storage.append_jsonl_many(
+                            "processed/actas_detalle_votos.jsonl",
+                            votos_con_contexto
+                        )
 
                         contadores["votos_detalle"] += len(votos)
 
                         lineas = extraer_linea_tiempo_detalle_acta(detalle_acta)
+                        lineas_con_contexto = [
+                            agregar_contexto_geografico(linea, dep, prov, dist)
+                            for linea in lineas
+                        ]
 
-                        for linea in lineas:
-                            linea = agregar_contexto_geografico(
-                                linea,
-                                dep,
-                                prov,
-                                dist
-                            )
-
-                            storage.append_jsonl(
-                                "processed/actas_detalle_linea_tiempo.jsonl",
-                                linea
-                            )
+                        storage.append_jsonl_many(
+                            "processed/actas_detalle_linea_tiempo.jsonl",
+                            lineas_con_contexto
+                        )
 
                         contadores["lineas_tiempo"] += len(lineas)
 
                         archivos = extraer_archivos_detalle_acta(detalle_acta)
+                        archivos_con_contexto = [
+                            agregar_contexto_geografico(archivo, dep, prov, dist)
+                            for archivo in archivos
+                        ]
 
-                        for archivo in archivos:
-                            archivo = agregar_contexto_geografico(
-                                archivo,
-                                dep,
-                                prov,
-                                dist
-                            )
-
-                            storage.append_jsonl(
-                                "processed/actas_detalle_archivos.jsonl",
-                                archivo
-                            )
+                        storage.append_jsonl_many(
+                            "processed/actas_detalle_archivos.jsonl",
+                            archivos_con_contexto
+                        )
 
                         contadores["archivos_acta"] += len(archivos)
 
