@@ -261,20 +261,30 @@ def main():
     # Grupo mutuamente exclusivo para que solo se pueda elegir una acción a la vez
     grupo = parser.add_mutually_exclusive_group(required=True)
     grupo.add_argument('--start_nodes', type=int, metavar='N', help="Número de Nodos Workers a levantar")
-    grupo.add_argument('--delete', action='store_true', help="Borrar todos los Nodos Workers creados")
-    grupo.add_argument('--check_ssh', action='store_true', help="Verifica el enlace SSH y la versión de Hadoop en todos los nodos")
+    grupo.add_argument('--delete', action='store_true', help="Borrar (Terminate) todos los Nodos Workers creados")
+    grupo.add_argument('--check_ssh', action='store_true', help="Monitor en bucle para iniciar Hadoop")
+    
+    grupo.add_argument('--pause', action='store_true', help="Pausa (Stop) las instancias EC2 para ahorrar dinero")
+    grupo.add_argument('--resume', action='store_true', help="Reanuda (Start) las instancias EC2 pausadas")
     
     args = parser.parse_args()
 
+    # 2. CONECTAMOS LOS ARGUMENTOS CON SUS FUNCIONES
     if args.delete:
         destruir_workers()
     elif args.check_ssh:
         verificar_conexion_ssh()
+    elif args.pause:
+        detener_instancias()   
+    elif args.resume:
+        reanudar_instancias() 
     elif args.start_nodes is not None:
         if args.start_nodes <= 0:
             print("Error: El número de nodos debe ser mayor a 0.")
             sys.exit(1)
         levantar_workers(args.start_nodes)
 
+if __name__ == "__main__":
+    main()
 if __name__ == "__main__":
     main()
