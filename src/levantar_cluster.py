@@ -17,13 +17,13 @@ def obtener_ip_privada_maestro():
 
 def iniciar_hadoop_en_maestro():
     """Ejecuta los comandos de inicio de Hadoop en el nodo Maestro."""
+    ip_maestro = obtener_ip_privada_maestro()
     print("\nTodos los nodos responden. Auto-configurando el Maestro e iniciando servicios...")
     
-    # Comandos para formatear (si es necesario) e iniciar servicios
-    # Agregamos la configuración local del Maestro antes de arrancar Hadoop
     comandos = [
-        # 1. Asegurar que el Maestro reconoce su propio nombre 'master'
-        "sudo sh -c 'grep -q \"127.0.0.1 master\" /etc/hosts || echo \"127.0.0.1 master\" >> /etc/hosts'",
+        # 1. CRÍTICO: Usar la IP privada real en lugar de 127.0.0.1 para que la red no colapse
+        "sudo sed -i '/master/d' /etc/hosts", # Borra entradas antiguas
+        f"sudo sh -c 'echo \"{ip_maestro} master\" >> /etc/hosts'",
         
         # 2. Asegurar que el Maestro tiene permisos para conectarse a sí mismo por SSH
         "cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys",
@@ -31,8 +31,23 @@ def iniciar_hadoop_en_maestro():
         
         # 3. Cargar variables de entorno
         "source ~/.bashrc",
+
+        # 4. CRÍTICO: Sobrescribir yarn-site.xml en el Maestro con el hack del disco
+        """cat > /home/ec2-user/hadoop-3.3.6/etc/hadoop/yarn-site.xml << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <property><name>yarn.resourcemanager.hostname</name><value>master</value></property>
+    <property><name>yarn.nodemanager.aux-services</name><value>mapreduce_shuffle</value></property>
+    <property><name>yarn.nodemanager.disk-health-checker.enable</name><value>false</value></property>
+    <property><name>yarn.nodemanager.disk-health-checker.max-disk-utilization-per-disk-percentage</name><value>100.0</value></property>
+</configuration>
+EOF""",
         
-        # 4. Formatear e iniciar
+        # 5. CRÍTICO: Crear la carpeta de logs y darle permisos 777 antes de iniciar YARN
+        "mkdir -p /home/ec2-user/hadoop-3.3.6/logs/userlogs",
+        "chmod 777 /home/ec2-user/hadoop-3.3.6/logs/userlogs",
+        
+        # 6. Formatear e iniciar
         "/home/ec2-user/hadoop-3.3.6/bin/hdfs namenode -format -nonInteractive || echo 'Ya formateado'",
         "/home/ec2-user/hadoop-3.3.6/sbin/start-dfs.sh",
         "/home/ec2-user/hadoop-3.3.6/sbin/start-yarn.sh"
@@ -41,7 +56,6 @@ def iniciar_hadoop_en_maestro():
     un_solo_comando = " && ".join(comandos)
     
     try:
-        # Ejecutamos a través de bash para cargar el profile correctamente
         subprocess.run(["bash", "-c", un_solo_comando], check=True)
         print("Servicios iniciados. Revisa el estado con el comando 'jps'.")
     except subprocess.CalledProcessError as e:
@@ -127,11 +141,22 @@ cat > $HADOOP_ETC/yarn-site.xml << 'EOF'
 <configuration>
     <property><name>yarn.resourcemanager.hostname</name><value>master</value></property>
     <property><name>yarn.nodemanager.aux-services</name><value>mapreduce_shuffle</value></property>
+    
+    <!-- HACK PARA DISCOS DE 15GB: Apagar sensor de pánico y forzar límite a 100% -->
+    <property><name>yarn.nodemanager.disk-health-checker.enable</name><value>false</value></property>
+    <property><name>yarn.nodemanager.disk-health-checker.max-disk-utilization-per-disk-percentage</name><value>100.0</value></property>
 </configuration>
 EOF
 
+
+
 mkdir -p /home/ec2-user/hadoop-3.3.6/hdfs/namenode
 mkdir -p /home/ec2-user/hadoop-3.3.6/hdfs/datanode
+
+# CRÍTICO: Pre-crear la carpeta de logs con permisos absolutos
+mkdir -p /home/ec2-user/hadoop-3.3.6/logs/userlogs
+chmod 777 /home/ec2-user/hadoop-3.3.6/logs/userlogs
+
 chown -R ec2-user:ec2-user /home/ec2-user/hadoop-3.3.6
 chown ec2-user:ec2-user /home/ec2-user/.bashrc
 """
@@ -294,7 +319,5 @@ def main():
             sys.exit(1)
         levantar_workers(args.start_nodes)
 
-if __name__ == "__main__":
-    main()
 if __name__ == "__main__":
     main()
