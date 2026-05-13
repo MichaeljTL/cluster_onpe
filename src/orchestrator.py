@@ -235,7 +235,7 @@ def main():
         print("    -> Iniciando descarga masiva...")
         comando_ssh = [
             "ssh", "-o", "StrictHostKeyChecking=no", f"{USUARIO_SSH}@{ip_worker}",
-            f"nohup python3 {ruta_script_remota} --ubigeos {parametro_ubigeos} --storage hdfs > /home/{USUARIO_SSH}/worker_{id_worker}.log 2>&1 &"
+            f"nohup python3 {ruta_script_remota} --ubigeos {parametro_ubigeos} --storage local > /home/{USUARIO_SSH}/worker_{id_worker}.log 2>&1 &"
         ]
         subprocess.Popen(comando_ssh)
 
