@@ -20,20 +20,18 @@ def iniciar_hadoop_en_maestro():
     ip_maestro = obtener_ip_privada_maestro()
     print("\nTodos los nodos responden. Auto-configurando el Maestro e iniciando servicios...")
     
-    comandos = [
-        # 1. CRÍTICO: Usar la IP privada real en lugar de 127.0.0.1 para que la red no colapse
-        "sudo sed -i '/master/d' /etc/hosts", # Borra entradas antiguas
-        f"sudo sh -c 'echo \"{ip_maestro} master\" >> /etc/hosts'",
-        
-        # 2. Asegurar que el Maestro tiene permisos para conectarse a sí mismo por SSH
-        "cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys",
-        "chmod 600 ~/.ssh/authorized_keys",
-        
-        # 3. Cargar variables de entorno
-        "source ~/.bashrc",
+    script_bash = f"""#!/bin/bash
+# 1. Configurar hosts y red
+sudo sed -i '/master/d' /etc/hosts
+sudo sh -c 'echo "{ip_maestro} master" >> /etc/hosts'
 
-        # 4. CRÍTICO: Sobrescribir yarn-site.xml en el Maestro con el hack del disco
-        """cat > /home/ec2-user/hadoop-3.3.6/etc/hadoop/yarn-site.xml << 'EOF'
+# 2. Asegurar SSH interno
+cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/authorized_keys
+source ~/.bashrc
+
+# 3. Inyectar configuración YARN blindada
+cat > /home/ec2-user/hadoop-3.3.6/etc/hadoop/yarn-site.xml << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
     <property><name>yarn.resourcemanager.hostname</name><value>master</value></property>
@@ -41,26 +39,24 @@ def iniciar_hadoop_en_maestro():
     <property><name>yarn.nodemanager.disk-health-checker.enable</name><value>false</value></property>
     <property><name>yarn.nodemanager.disk-health-checker.max-disk-utilization-per-disk-percentage</name><value>100.0</value></property>
 </configuration>
-EOF""",
-        
-        # 5. CRÍTICO: Crear la carpeta de logs y darle permisos 777 antes de iniciar YARN
-        "mkdir -p /home/ec2-user/hadoop-3.3.6/logs/userlogs",
-        "chmod 777 /home/ec2-user/hadoop-3.3.6/logs/userlogs",
-        
-        # 6. Formatear e iniciar
-        "/home/ec2-user/hadoop-3.3.6/bin/hdfs namenode -format -nonInteractive || echo 'Ya formateado'",
-        "/home/ec2-user/hadoop-3.3.6/sbin/start-dfs.sh",
-        "/home/ec2-user/hadoop-3.3.6/sbin/start-yarn.sh"
-    ]
-    
-    un_solo_comando = " && ".join(comandos)
+EOF
+
+# 4. Crear carpeta problemática de logs y dar permisos
+mkdir -p /home/ec2-user/hadoop-3.3.6/logs/userlogs
+chmod 777 /home/ec2-user/hadoop-3.3.6/logs/userlogs
+
+# 5. Iniciar Hadoop
+/home/ec2-user/hadoop-3.3.6/bin/hdfs namenode -format -nonInteractive || echo 'Ya formateado'
+/home/ec2-user/hadoop-3.3.6/sbin/start-dfs.sh
+/home/ec2-user/hadoop-3.3.6/sbin/start-yarn.sh
+"""
     
     try:
-        subprocess.run(["bash", "-c", un_solo_comando], check=True)
+        # Ejecutamos el script multilínea directamente en bash
+        subprocess.run(["bash", "-c", script_bash], check=True)
         print("Servicios iniciados. Revisa el estado con el comando 'jps'.")
     except subprocess.CalledProcessError as e:
         print(f"Error al iniciar Hadoop: {e}")
-
 def levantar_workers(cantidad):
     """Crea la cantidad especificada de instancias EC2 y les inyecta el User Data."""
     ip_maestro = obtener_ip_privada_maestro()
