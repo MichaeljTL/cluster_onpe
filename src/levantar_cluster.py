@@ -17,25 +17,28 @@ def obtener_ip_privada_maestro():
 
 def iniciar_hadoop_en_maestro():
     """Ejecuta los comandos de inicio de Hadoop en el nodo Maestro."""
-    print("\nTodos los nodos responden. Iniciando servicios de Hadoop...")
+    print("\nTodos los nodos responden. Auto-configurando el Maestro e iniciando servicios...")
     
     # Comandos para formatear (si es necesario) e iniciar servicios
-    # Usamos -nonInteractive para que no se detenga pidiendo confirmación
+    # Agregamos la configuración local del Maestro antes de arrancar Hadoop
     comandos = [
+        # 1. Asegurar que el Maestro reconoce su propio nombre 'master'
+        "sudo sh -c 'grep -q \"127.0.0.1 master\" /etc/hosts || echo \"127.0.0.1 master\" >> /etc/hosts'",
+        
+        # 2. Asegurar que el Maestro tiene permisos para conectarse a sí mismo por SSH
+        "cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys",
+        "chmod 600 ~/.ssh/authorized_keys",
+        
+        # 3. Cargar variables de entorno
         "source ~/.bashrc",
-        f"/home/ec2-user/hadoop-3.3.6/bin/hdfs namenode -format -nonInteractive || echo 'Ya formateado'",
+        
+        # 4. Formatear e iniciar
+        "/home/ec2-user/hadoop-3.3.6/bin/hdfs namenode -format -nonInteractive || echo 'Ya formateado'",
         "/home/ec2-user/hadoop-3.3.6/sbin/start-dfs.sh",
         "/home/ec2-user/hadoop-3.3.6/sbin/start-yarn.sh"
     ]
     
     un_solo_comando = " && ".join(comandos)
-    
-    try:
-        # Ejecutamos a través de bash para cargar el profile correctamente
-        subprocess.run(["bash", "-c", un_solo_comando], check=True)
-        print("Servicios iniciados. Revisa el estado con el comando 'jps'.")
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Error al iniciar Hadoop: {e}")
     
     try:
         # Ejecutamos a través de bash para cargar el profile correctamente
