@@ -488,6 +488,7 @@ def obtener_actas_distrito(ubigeo_distrito, storage, sleep_time):
 
     while True:
         ruta_pagina = f"raw/actas/listado/{ubigeo_distrito}_pagina_{pagina}.json"
+        pagina_descargada = False
 
         existente = storage.cargar_json_si_existe(ruta_pagina)
 
@@ -514,6 +515,7 @@ def obtener_actas_distrito(ubigeo_distrito, storage, sleep_time):
                 break
 
             storage.guardar_json(ruta_pagina, data)
+            pagina_descargada = True
 
         payload = data.get("data", {})
         content = payload.get("content", [])
@@ -533,7 +535,8 @@ def obtener_actas_distrito(ubigeo_distrito, storage, sleep_time):
         if total_paginas is None or pagina >= total_paginas:
             break
 
-        time.sleep(sleep_time)
+        if pagina_descargada:
+            time.sleep(sleep_time)
 
     consolidado = {
         "success": True,
@@ -563,7 +566,7 @@ def obtener_detalle_acta(id_acta, storage):
 
     if existente is not None:
         print("Detalle ya existente, usando checkpoint:", id_acta)
-        return existente.get("data")
+        return existente.get("data"), True
 
     data = get_json(
         endpoint,
@@ -574,11 +577,11 @@ def obtener_detalle_acta(id_acta, storage):
 
     if not data:
         print("No se pudo obtener detalle de acta:", id_acta)
-        return None
+        return None, False
 
     storage.guardar_json(ruta_detalle, data)
 
-    return data.get("data")
+    return data.get("data"), False
 
 
 # ============================================================
@@ -938,8 +941,6 @@ def ejecutar_worker(
                         }
                     )
 
-                time.sleep(sleep_time)
-
                 # -----------------------------
                 # Listado de actas
                 # -----------------------------
@@ -970,7 +971,7 @@ def ejecutar_worker(
                     # Detalle de acta
                     # -----------------------------
                     if descargar_detalle and id_acta is not None:
-                        detalle_acta = obtener_detalle_acta(id_acta, storage)
+                        detalle_acta, es_checkpoint = obtener_detalle_acta(id_acta, storage)
 
                         if not detalle_acta:
                             contadores["errores_detalle"] += 1
@@ -1044,13 +1045,8 @@ def ejecutar_worker(
 
                         contadores["archivos_acta"] += len(archivos)
 
-                        time.sleep(sleep_time)
-
-                time.sleep(sleep_time)
-
-            time.sleep(sleep_time)
-
-        time.sleep(sleep_time)
+                        if not es_checkpoint:
+                            time.sleep(sleep_time)
 
     manifest = {
         "worker_id": storage.worker_id,
