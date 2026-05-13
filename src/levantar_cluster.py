@@ -4,44 +4,70 @@ import argparse
 import sys
 import os
 import subprocess
-
+import socket
 
 # Importamos las variables globales desde nuestro archivo config.py
 from config import REGION, AMI_ID, KEY_NAME, SECURITY_GROUP_ID, SUBNET_ID, TIPO_INSTANCIA, USUARIO_SSH
 
 ec2_resource = boto3.resource('ec2', region_name=REGION)
 
+def obtener_ip_privada_maestro():
+    """Obtiene la IP privada de la instancia actual (Maestro)."""
+    return socket.gethostbyname(socket.gethostname())
+
+def iniciar_hadoop_en_maestro():
+    """Ejecuta los comandos de inicio de Hadoop en el nodo Maestro."""
+    print("\nTodos los nodos responden. Iniciando servicios de Hadoop...")
+    
+    # Comandos para formatear (si es necesario) e iniciar servicios
+    # Usamos -nonInteractive para que no se detenga pidiendo confirmación
+    comandos = [
+        "source ~/.bashrc",
+        f"/home/ec2-user/hadoop-3.3.6/bin/hdfs namenode -format -nonInteractive || echo 'Ya formateado'",
+        "/home/ec2-user/hadoop-3.3.6/sbin/start-dfs.sh",
+        "/home/ec2-user/hadoop-3.3.6/sbin/start-yarn.sh"
+    ]
+    
+    un_solo_comando = " && ".join(comandos)
+    
+    try:
+        # Ejecutamos a través de bash para cargar el profile correctamente
+        subprocess.run(["bash", "-c", un_solo_comando], check=True)
+        print("Servicios iniciados. Revisa el estado con el comando 'jps'.")
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Error al iniciar Hadoop: {e}")
+    
+    try:
+        # Ejecutamos a través de bash para cargar el profile correctamente
+        subprocess.run(["bash", "-c", un_solo_comando], check=True)
+        print("Servicios iniciados. Revisa el estado con el comando 'jps'.")
+    except subprocess.CalledProcessError as e:
+        print(f"Error al iniciar Hadoop: {e}")
+
 def levantar_workers(cantidad):
     """Crea la cantidad especificada de instancias EC2 y les inyecta el User Data."""
-
-    # =========================================================
-    # [NUEVA LÓGICA] Generar y leer la llave SSH del Maestro
-    # =========================================================
-    archivo_llave = "/home/ec2-user/.ssh/id_rsa"
+    ip_maestro = obtener_ip_privada_maestro()
     
-    # Si el Maestro no tiene llave propia, la crea sin pedir contraseña
+    archivo_llave = "/home/ec2-user/.ssh/id_rsa"
     if not os.path.exists(archivo_llave):
-        print("🔑 Generando llave SSH interna para el clúster...")
+        print("Generando llave SSH interna para el clúster...")
         subprocess.run(["ssh-keygen", "-t", "rsa", "-N", "", "-f", archivo_llave], check=True)
         
-    # Leemos la llave pública del Maestro
     with open(f"{archivo_llave}.pub", "r") as f:
         llave_publica_maestro = f.read().strip()
-    # =========================================================
 
-    # Tu User Data original (sin usar f-strings para no romper el bash)
+    # MODIFICACIÓN AQUÍ: Añadimos la IP del maestro al inicio del script para que el worker lo reconozca
+    user_data_script = f"#!/bin/bash\necho '{ip_maestro} master' >> /etc/hosts\n" 
     
-    user_data_script = """#!/bin/bash
+    # Continuación del script (tu código original)
+    user_data_script += """
 # ==========================================
 # User Data para Nodos Hadoop (Master/Worker)
 # ==========================================
 
-# 1. Actualizar sistema e instalar dependencias (¡Git añadido!)
+# 1. Actualizar sistema e instalar dependencias
 yum update -y
 yum install -y java-11-amazon-corretto-devel wget tar python3 python3-pip git
-
-# 1.1 Instalar librerías de Python necesarias para el clúster
-# (argparse y subprocess ya vienen por defecto en Python, no usan pip)
 pip3 install requests boto3
 
 # 2. Descargar y extraer Hadoop
@@ -52,8 +78,6 @@ rm hadoop-3.3.6.tar.gz
 
 # 3. Configurar variables de entorno
 cat << 'EOF' >> /home/ec2-user/.bashrc
-
-# Hadoop & Java Variables
 export JAVA_HOME=/usr/lib/jvm/java-11-amazon-corretto.x86_64
 export PATH=$JAVA_HOME/bin:$PATH
 export HADOOP_HOME=/home/ec2-user/hadoop-3.3.6
@@ -78,104 +102,44 @@ EOF
 cat > $HADOOP_ETC/hdfs-site.xml << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
-    <property>
-        <name>dfs.replication</name>
-        <value>2</value>
-    </property>
-    <property>
-        <name>dfs.namenode.name.dir</name>
-        <value>file:///home/ec2-user/hadoop-3.3.6/hdfs/namenode</value>
-    </property>
-    <property>
-        <name>dfs.datanode.data.dir</name>
-        <value>file:///home/ec2-user/hadoop-3.3.6/hdfs/datanode</value>
-    </property>
-    <property>
-        <name>dfs.namenode.http-address</name>
-        <value>0.0.0.0:9870</value>
-    </property>
+    <property><name>dfs.replication</name><value>2</value></property>
+    <property><name>dfs.namenode.name.dir</name><value>file:///home/ec2-user/hadoop-3.3.6/hdfs/namenode</value></property>
+    <property><name>dfs.datanode.data.dir</name><value>file:///home/ec2-user/hadoop-3.3.6/hdfs/datanode</value></property>
+    <property><name>dfs.namenode.http-address</name><value>0.0.0.0:9870</value></property>
 </configuration>
 EOF
 
 cat > $HADOOP_ETC/mapred-site.xml << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
-    <property>
-        <name>mapreduce.framework.name</name>
-        <value>yarn</value>
-    </property>
-    <property>
-        <name>mapreduce.map.memory.mb</name>
-        <value>512</value>
-    </property>
-    <property>
-        <name>mapreduce.reduce.memory.mb</name>
-        <value>512</value>
-    </property>
-    <property>
-        <name>mapreduce.map.cpu.vcores</name>
-        <value>1</value>
-    </property>
-    <property>
-        <name>mapreduce.reduce.cpu.vcores</name>
-        <value>1</value>
-    </property>
-    <property>
-        <name>yarn.app.mapreduce.am.env</name>
-        <value>HADOOP_MAPRED_HOME=${HADOOP_HOME}</value>
-    </property>
-    <property>
-        <name>mapreduce.map.env</name>
-        <value>HADOOP_MAPRED_HOME=${HADOOP_HOME}</value>
-    </property>
-    <property>
-        <name>mapreduce.reduce.env</name>
-        <value>HADOOP_MAPRED_HOME=${HADOOP_HOME}</value>
-    </property>
+    <property><name>mapreduce.framework.name</name><value>yarn</value></property>
+    <property><name>yarn.app.mapreduce.am.env</name><value>HADOOP_MAPRED_HOME=${HADOOP_HOME}</value></property>
+    <property><name>mapreduce.map.env</name><value>HADOOP_MAPRED_HOME=${HADOOP_HOME}</value></property>
+    <property><name>mapreduce.reduce.env</name><value>HADOOP_MAPRED_HOME=${HADOOP_HOME}</value></property>
 </configuration>
 EOF
 
 cat > $HADOOP_ETC/yarn-site.xml << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
-    <property>
-        <name>yarn.resourcemanager.hostname</name>
-        <value>master</value>
-    </property>
-    <property>
-        <name>yarn.nodemanager.aux-services</name>
-        <value>mapreduce_shuffle</value>
-    </property>
-    <property>
-        <name>yarn.nodemanager.resource.memory-mb</name>
-        <value>2048</value>
-    </property>
-    <property>
-        <name>yarn.nodemanager.resource.cpu-vcores</name>
-        <value>2</value>
-    </property>
+    <property><name>yarn.resourcemanager.hostname</name><value>master</value></property>
+    <property><name>yarn.nodemanager.aux-services</name><value>mapreduce_shuffle</value></property>
 </configuration>
 EOF
 
-# 5. Crear carpetas de HDFS
 mkdir -p /home/ec2-user/hadoop-3.3.6/hdfs/namenode
 mkdir -p /home/ec2-user/hadoop-3.3.6/hdfs/datanode
-
-# 6. Cambiar el propietario a ec2-user
 chown -R ec2-user:ec2-user /home/ec2-user/hadoop-3.3.6
 chown ec2-user:ec2-user /home/ec2-user/.bashrc
 """
 
-    # =========================================================
-    # [NUEVA LÓGICA] Inyectar la llave al final del script bash
-    # =========================================================
-    user_data_script += f"\n# Autorizar al Maestro\n"
+    # Inyectar la llave del maestro
+    user_data_script += f"\n# Autorizar al Maestro\nmkdir -p /home/ec2-user/.ssh\n"
     user_data_script += f"echo '{llave_publica_maestro}' >> /home/ec2-user/.ssh/authorized_keys\n"
     user_data_script += f"chmod 600 /home/ec2-user/.ssh/authorized_keys\n"
-    user_data_script += f"chown ec2-user:ec2-user /home/ec2-user/.ssh/authorized_keys\n"
-    # =========================================================
+    user_data_script += f"chown -R ec2-user:ec2-user /home/ec2-user/.ssh\n"
 
-    print(f"Solicitando {cantidad} instancias Worker a AWS...")
+    print(f"Solicitando {cantidad} Workers. Master IP: {ip_maestro}")
     
     instancias = ec2_resource.create_instances(
         ImageId=AMI_ID,
@@ -186,65 +150,57 @@ chown ec2-user:ec2-user /home/ec2-user/.bashrc
         SecurityGroupIds=[SECURITY_GROUP_ID],
         SubnetId=SUBNET_ID,
         UserData=user_data_script,
-        TagSpecifications=[
-            {
-                'ResourceType': 'instance',
-                'Tags': [
-                    {'Key': 'Name', 'Value': 'Worker-ONPE'},
-                    {'Key': 'Rol', 'Value': 'HadoopWorker'}
-                ]
-            }
-        ]
+        TagSpecifications=[{'ResourceType': 'instance', 'Tags': [{'Key': 'Name', 'Value': 'Worker-ONPE'}, {'Key': 'Rol', 'Value': 'HadoopWorker'}]}]
     )
     
-    print("Instancias creadas. Esperando a que AWS las encienda...")
+    # Registro en el archivo 'workers' del Maestro
+    path_workers_file = "/home/ec2-user/hadoop-3.3.6/etc/hadoop/workers"
+    with open(path_workers_file, "w") as f:
+        f.write("localhost\n")
+
     for instancia in instancias:
         instancia.wait_until_running()
         instancia.reload()
-        print(f"  -> Worker en línea - IP Privada: {instancia.private_ip_address}")
-        
-    print("\nLas instancias están encendidas, pero la instalación de Hadoop (User Data) toma unos 3 minutos.")
-    print("Puedes usar el comando '--check_ssh' más tarde para verificar cuándo estén listas.")
+        ip_privada = instancia.private_ip_address
+        with open(path_workers_file, "a") as f:
+            f.write(f"{ip_privada}\n")
+        print(f"  -> Nodo configurado y registrado: {ip_privada}")
+
+    print("\nClúster desplegado. Pasos finales en el Maestro:")
+    print("1. hdfs namenode -format")
+    print("2. start-dfs.sh && start-yarn.sh")
 
 def verificar_conexion_ssh():
-    """Busca los workers activos e intenta una conexión SSH para validar si ya terminaron de instalar todo."""
-    print("Buscando Nodos Workers activos para probar la conexión SSH...")
-    
+    """Verifica conexión y si todos están listos, inicia Hadoop."""
     instancias_workers = ec2_resource.instances.filter(
-        Filters=[
-            {'Name': 'tag:Rol', 'Values': ['HadoopWorker']},
-            {'Name': 'instance-state-name', 'Values': ['running']}
-        ]
+        Filters=[{'Name': 'tag:Rol', 'Values': ['HadoopWorker']}, {'Name': 'instance-state-name', 'Values': ['running']}]
     )
     
     ips_workers = [instancia.private_ip_address for instancia in instancias_workers]
-    
     if not ips_workers:
-        print("No se encontraron Nodos Workers en ejecución.")
+        print("No hay Workers activos.")
         return
 
-    print(f"Se encontraron {len(ips_workers)} Workers. Iniciando pruebas de enlace...\n")
+    nodos_listos = 0
+    print(f"Verificando {len(ips_workers)} Workers...")
 
     for ip in ips_workers:
-        print(f"  [SSH] Conectando a {ip}...")
-        
-        comando_ssh = [
-            "ssh", "-o", "StrictHostKeyChecking=no", f"{USUARIO_SSH}@{ip}",
-            "echo 'SSH exitoso' && echo 'Version de Hadoop:' && /home/ec2-user/hadoop-3.3.6/bin/hadoop version | head -n 1"
-        ]
-        
+        comando_ssh = ["ssh", "-o", "StrictHostKeyChecking=no", f"{USUARIO_SSH}@{ip}", "ls /home/ec2-user/hadoop-3.3.6/bin/hadoop"]
         try:
-            resultado = subprocess.run(comando_ssh, capture_output=True, text=True, timeout=15)
+            resultado = subprocess.run(comando_ssh, capture_output=True, text=True, timeout=10)
             if resultado.returncode == 0:
-                # Si todo sale bien, imprimimos el resultado limpio
-                salida_limpia = resultado.stdout.replace('\n', ' - ')
-                print(f"    -> {salida_limpia}")
+                print(f"  -> {ip}: LISTO")
+                nodos_listos += 1
             else:
-                print(f"    -> Aún no responde correctamente (Puede que el User Data siga instalando).")
-        except subprocess.TimeoutExpired:
-            print(f"    -> Tiempo de espera agotado. El nodo no responde por SSH.")
-        except Exception as e:
-            print(f"    -> Falla inesperada: {e}")
+                print(f"  -> {ip}: Instalando todavía...")
+        except Exception:
+            print(f"  -> {ip}: Sin respuesta.")
+
+    # SI TODOS LOS NODOS ESTÁN LISTOS, INICIAMOS HADOOP
+    if nodos_listos == len(ips_workers):
+        iniciar_hadoop_en_maestro()
+    else:
+        print(f"\nFaltan {len(ips_workers) - nodos_listos} nodos por estar listos. Vuelve a intentar en un momento.")
 
 def destruir_workers():
     """Busca todas las instancias con la etiqueta 'Rol: HadoopWorker' y las destruye (Terminate)."""
