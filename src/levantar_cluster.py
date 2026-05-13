@@ -205,6 +205,31 @@ def verificar_conexion_ssh():
     else:
         print(f"\nFaltan {len(ips_workers) - nodos_listos} nodos por estar listos. Vuelve a intentar en un momento.")
 
+def detener_instancias():
+    """Pausa (Stop) las instancias de AWS para no generar costos sin borrarlas."""
+    instancias = ec2_resource.instances.filter(
+        Filters=[{'Name': 'tag:Rol', 'Values': ['HadoopWorker']}, {'Name': 'instance-state-name', 'Values': ['running']}]
+    )
+    ids = [i.id for i in instancias]
+    if ids:
+        print(f"Pausando {len(ids)} Workers... (Dejarán de cobrar computo)")
+        ec2_resource.instances.filter(InstanceIds=ids).stop()
+    else:
+        print("No hay Workers encendidos para pausar.")
+
+def reanudar_instancias():
+    """Reanuda (Start) las instancias pausadas."""
+    instancias = ec2_resource.instances.filter(
+        Filters=[{'Name': 'tag:Rol', 'Values': ['HadoopWorker']}, {'Name': 'instance-state-name', 'Values': ['stopped']}]
+    )
+    ids = [i.id for i in instancias]
+    if ids:
+        print(f"Encendiendo {len(ids)} Workers previamente pausados...")
+        ec2_resource.instances.filter(InstanceIds=ids).start()
+        print("Espera unos minutos a que arranquen y vuelve a correr '--check_ssh'.")
+    else:
+        print("No hay Workers pausados.")
+
 def destruir_workers():
     """Busca todas las instancias con la etiqueta 'Rol: HadoopWorker' y las destruye (Terminate)."""
     print("Buscando Nodos Workers en el clúster para destruirlos...")
