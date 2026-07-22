@@ -1,0 +1,389 @@
+\documentclass{practicaEPCC}
+
+% --- PAQUETES DE IDIOMA Y CODIFICACION ---
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish]{babel}
+% -----------------------------------------
+
+\usepackage{hyperref}
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{minted}
+\usepackage{multicol}
+\usepackage{pgfplots}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{listings}
+\usepackage{color}
+\usepackage{adjustbox}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{geometry}
+\usepackage{enumitem}
+\usepackage[strings]{underscore}
+
+\pgfplotsset{compat=1.18}
+
+\lstset{
+ basicstyle=\ttfamily\footnotesize,
+ keywordstyle=\color{blue},
+ commentstyle=\color{gray},
+ stringstyle=\color{red},
+ numbers=left,
+ numberstyle=\tiny,
+ stepnumber=1,
+ numbersep=5pt,
+ frame=single,
+ tabsize=2,
+ showstringspaces=false,
+ breaklines=true,
+ captionpos=b
+}
+
+\newcommand{\imageplaceholder}[2]{
+\begin{figure}[H]
+\centering
+\fbox{
+\begin{minipage}[c][7cm][c]{0.9\textwidth}
+\centering
+\vspace{0.5cm}
+\textbf{Espacio para imagen}\\[0.4cm]
+#1\\[0.4cm]
+\textit{Reemplazar este recuadro por:}\\
+\texttt{\string\includegraphics[width=0.95\string\textwidth]\{Imagenes/#2\}}
+\vspace{0.5cm}
+\end{minipage}
+}
+\caption{#1}
+\end{figure}
+}
+
+\school{Escuela Profesional de Ciencia de la Computacion}
+\course{Big Data}
+\professor{}
+\title{Laboratorio: Instalacion y demostracion de Apache Kafka sobre instancias EC2 en AWS}
+\author{Michael Jarnie Ticona Larico}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Instalacion de Apache Kafka en AWS EC2}
+
+\subsection{Objetivo}
+
+El objetivo del laboratorio fue instalar Apache Kafka sobre instancias EC2 en AWS y demostrar los conceptos fundamentales del modelo de mensajeria distribuida de Kafka: \textit{Producer}, \textit{Consumer}, \textit{Topic}, \textit{Partition}, \textit{Offset} y \textit{Consumer Group}.
+
+Para automatizar el proceso se implemento un script en Python con \texttt{boto3}, encargado de crear las instancias EC2, inyectar scripts de inicializacion mediante \textit{user-data} y configurar automaticamente el nodo master y los nodos trabajadores.
+
+\subsection{Arquitectura implementada}
+
+La arquitectura utilizada considera una instancia inicial desde la cual se ejecuta el script de aprovisionamiento. Esta instancia actua como controlador u orquestador, pero no forma parte del cluster Kafka. Desde ella se crean nuevas instancias EC2 para el laboratorio.
+
+Al ejecutar el comando:
+
+\begin{lstlisting}[language=bash]
+python3 src/levantar_kafka.py --start_nodes 2
+\end{lstlisting}
+
+se crean tres instancias EC2 nuevas:
+
+\begin{itemize}
+\item \texttt{Kafka-Master-<run\_id>}: nodo principal donde se instala y ejecuta el broker de Kafka.
+\item \texttt{Kafka-Worker-1-<run\_id>}: nodo trabajador que actua como cliente Kafka.
+\item \texttt{Kafka-Worker-2-<run\_id>}: segundo nodo trabajador que actua como cliente Kafka.
+\end{itemize}
+
+Cada instancia recibe un nombre unico mediante la etiqueta \texttt{Name}. Ademas, se agregan etiquetas como \texttt{Proyecto}, \texttt{Rol} y \texttt{ClusterRun}, permitiendo identificar facilmente los recursos creados en la consola de AWS.
+
+\imageplaceholder{Instancias EC2 creadas para el laboratorio Kafka: master y workers con nombres unicos.}{kafka_instancias_ec2.png}
+
+\subsection{Configuracion previa}
+
+La configuracion de AWS se centralizo en el archivo \texttt{src/config.py}. Este archivo contiene los identificadores necesarios para crear las instancias EC2:
+
+\begin{lstlisting}[language=Python]
+REGION = 'us-east-1'
+AMI_ID = 'ami-03f4fd1e8233bd64d'
+KEY_NAME = 'cluster'
+SECURITY_GROUP_ID = 'sg-00c82fc157b6a0478'
+SUBNET_ID = 'subnet-0346fd19f61aafdcd'
+TIPO_INSTANCIA = 't3.small'
+USUARIO_SSH = 'ec2-user'
+\end{lstlisting}
+
+El grupo de seguridad debe permitir la comunicacion por SSH y por los puertos utilizados por Kafka:
+
+\begin{itemize}
+\item Puerto \texttt{22}: conexion SSH.
+\item Puerto \texttt{9092}: conexion de clientes al broker Kafka.
+\item Puerto \texttt{9093}: comunicacion interna del controlador Kafka en modo KRaft.
+\end{itemize}
+
+\subsection{Script de aprovisionamiento}
+
+La creacion de las instancias se realizo mediante el script \texttt{src/levantar\_kafka.py}. Este programa utiliza \texttt{boto3} para comunicarse con AWS EC2 y crear los nodos necesarios.
+
+Las acciones principales del script son:
+
+\begin{enumerate}
+\item Leer los scripts \texttt{user\_data\_master.sh} y \texttt{user\_data\_worker.sh}.
+\item Crear una instancia EC2 para el master Kafka.
+\item Obtener la IP privada del master.
+\item Crear los workers inyectando la IP privada del broker.
+\item Asignar nombres diferentes a cada nodo creado.
+\item Mostrar los comandos necesarios para conectarse y ejecutar la demostracion.
+\end{enumerate}
+
+\begin{lstlisting}[language=bash]
+python3 src/levantar_kafka.py --start_nodes 2
+\end{lstlisting}
+
+\imageplaceholder{Ejecucion del script de creacion de instancias Kafka desde Python.}{kafka_start_nodes.png}
+
+\subsection{Instalacion automatica en el nodo master}
+
+El nodo master recibe el script \texttt{scripts/user\_data\_master.sh}. Este script se ejecuta automaticamente al iniciar la instancia EC2 y realiza las siguientes tareas:
+
+\begin{itemize}
+\item Actualiza el sistema operativo.
+\item Instala Java 11, \texttt{wget}, \texttt{tar} y \texttt{nmap-ncat}.
+\item Descarga Apache Kafka 3.7.1.
+\item Configura Kafka en modo KRaft, sin depender de ZooKeeper.
+\item Crea el servicio \texttt{kafka.service} en \texttt{systemd}.
+\item Inicia Kafka automaticamente.
+\item Crea el script \texttt{/home/ec2-user/kafka\_demo.sh} para la demostracion.
+\end{itemize}
+
+\begin{lstlisting}[language=bash]
+sudo systemctl status kafka
+\end{lstlisting}
+
+La salida obtenida muestra que Kafka quedo activo y escuchando conexiones en el puerto \texttt{9092}.
+
+\imageplaceholder{Estado del servicio Kafka activo en el nodo master.}{kafka_systemctl_status.png}
+
+\subsection{Instalacion automatica en los workers}
+
+Los nodos trabajadores reciben el script \texttt{scripts/user\_data\_worker.sh}. A diferencia del master, estos nodos no ejecutan el broker Kafka, sino que instalan las herramientas cliente necesarias para conectarse al broker.
+
+Cada worker queda configurado con la variable de entorno:
+
+\begin{lstlisting}[language=bash]
+KAFKA_BROKER=<IP_PRIVADA_DEL_MASTER>:9092
+\end{lstlisting}
+
+Ademas, se crea el script:
+
+\begin{lstlisting}[language=bash]
+/home/ec2-user/kafka_client_demo.sh
+\end{lstlisting}
+
+Este script permite ejecutar consumidores desde los workers para demostrar el uso de \textit{Consumer Groups}.
+
+\imageplaceholder{Worker Kafka conectado al broker mediante la variable KAFKA\_BROKER.}{kafka_worker_cliente.png}
+
+\section{Demostracion de conceptos de Kafka}
+
+\subsection{Verificacion del broker}
+
+Una vez finalizado \textit{cloud-init}, se verifico que Kafka estuviera ejecutandose correctamente con el siguiente comando:
+
+\begin{lstlisting}[language=bash]
+sudo systemctl status kafka
+\end{lstlisting}
+
+La salida mostro que el servicio estaba en estado \texttt{active (running)} y que Kafka habia iniciado correctamente:
+
+\begin{lstlisting}[language={}]
+Kafka Server started
+Awaiting socket connections on 0.0.0.0:9092
+Kafka version: 3.7.1
+\end{lstlisting}
+
+Esto confirma que el broker quedo listo para recibir productores y consumidores.
+
+\subsection{Ejecucion de la demostracion}
+
+La demostracion completa se ejecuto desde el master mediante:
+
+\begin{lstlisting}[language=bash]
+/home/ec2-user/kafka_demo.sh
+\end{lstlisting}
+
+Este script automatiza la creacion del topic, la publicacion de mensajes, el consumo de registros y la consulta de offsets por grupo de consumidores.
+
+\imageplaceholder{Ejecucion completa del script kafka\_demo.sh en el master.}{kafka_demo_completa.png}
+
+\subsection{Topic}
+
+Un \textit{Topic} en Kafka es una categoria o canal logico donde se almacenan mensajes. En el laboratorio se creo el topic \texttt{onpe-votos-demo}.
+
+\begin{lstlisting}[language=bash]
+kafka-topics.sh --bootstrap-server "$KAFKA_BROKER" \
+  --create --if-not-exists \
+  --topic "onpe-votos-demo" \
+  --partitions 3 \
+  --replication-factor 1
+\end{lstlisting}
+
+Este comando crea el canal donde los productores escriben mensajes y desde donde los consumidores los leen.
+
+\imageplaceholder{Creacion del topic onpe-votos-demo en Kafka.}{kafka_topic_creado.png}
+
+\subsection{Partition}
+
+Las \textit{Partitions} dividen un topic en segmentos independientes, permitiendo paralelismo y distribucion de carga. En este caso, el topic se creo con tres particiones.
+
+Para verificarlo se uso:
+
+\begin{lstlisting}[language=bash]
+kafka-topics.sh --bootstrap-server "$KAFKA_BROKER" \
+  --describe \
+  --topic "onpe-votos-demo"
+\end{lstlisting}
+
+La salida muestra las particiones \texttt{0}, \texttt{1} y \texttt{2}. Cada mensaje publicado se almacena en una de estas particiones.
+
+\imageplaceholder{Descripcion del topic mostrando sus tres particiones.}{kafka_particiones.png}
+
+\subsection{Producer}
+
+Un \textit{Producer} es el componente encargado de publicar mensajes en un topic. En el laboratorio se utilizo \texttt{kafka-console-producer.sh} para enviar mensajes simulando resultados de mesas electorales.
+
+\begin{lstlisting}[language=bash]
+cat <<MESSAGES | kafka-console-producer.sh \
+  --bootstrap-server "$KAFKA_BROKER" \
+  --topic "onpe-votos-demo" \
+  --property parse.key=true \
+  --property key.separator=:
+LIMA:mesa=001 votos=120
+AREQUIPA:mesa=002 votos=95
+CUSCO:mesa=003 votos=110
+LIMA:mesa=004 votos=130
+AREQUIPA:mesa=005 votos=102
+CUSCO:mesa=006 votos=99
+MESSAGES
+\end{lstlisting}
+
+Se usaron llaves como \texttt{LIMA}, \texttt{AREQUIPA} y \texttt{CUSCO} para que Kafka distribuya los mensajes entre particiones de acuerdo con la llave.
+
+\imageplaceholder{Producer enviando mensajes al topic onpe-votos-demo.}{kafka_producer.png}
+
+\subsection{Consumer}
+
+Un \textit{Consumer} lee los mensajes almacenados en un topic. Para consumir los mensajes desde el inicio se utilizo:
+
+\begin{lstlisting}[language=bash]
+kafka-console-consumer.sh \
+  --bootstrap-server "$KAFKA_BROKER" \
+  --topic "onpe-votos-demo" \
+  --from-beginning \
+  --timeout-ms 10000 \
+  --property print.partition=true \
+  --property print.offset=true \
+  --property print.key=true \
+  --property key.separator=" | "
+\end{lstlisting}
+
+La salida permite observar el contenido de los mensajes junto con su particion y offset.
+
+\imageplaceholder{Consumer leyendo mensajes desde el topic Kafka.}{kafka_consumer.png}
+
+\subsection{Offset}
+
+El \textit{Offset} representa la posicion de un mensaje dentro de una particion. Kafka asigna un offset incremental por cada mensaje almacenado.
+
+En la demostracion, el consumidor imprime el offset usando:
+
+\begin{lstlisting}[language=bash]
+--property print.offset=true
+\end{lstlisting}
+
+Por ejemplo, una salida puede mostrar mensajes con el siguiente formato:
+
+\begin{lstlisting}[language={}]
+Partition:0 | Offset:0 | LIMA | mesa=001 votos=120
+Partition:1 | Offset:0 | AREQUIPA | mesa=002 votos=95
+Partition:2 | Offset:0 | CUSCO | mesa=003 votos=110
+\end{lstlisting}
+
+Esto demuestra que cada particion mantiene su propia secuencia de offsets.
+
+\imageplaceholder{Salida del consumer mostrando particion y offset de cada mensaje.}{kafka_offsets.png}
+
+\subsection{Consumer Group}
+
+Un \textit{Consumer Group} permite que varios consumidores trabajen de manera coordinada leyendo un mismo topic. Kafka distribuye las particiones entre los consumidores del grupo.
+
+En el laboratorio se uso el grupo \texttt{grupo-consulta-onpe}:
+
+\begin{lstlisting}[language=bash]
+kafka-console-consumer.sh \
+  --bootstrap-server "$KAFKA_BROKER" \
+  --topic "onpe-votos-demo" \
+  --group "grupo-consulta-onpe" \
+  --from-beginning \
+  --max-messages 6
+\end{lstlisting}
+
+Luego se consulto el estado del grupo y sus offsets confirmados:
+
+\begin{lstlisting}[language=bash]
+kafka-consumer-groups.sh \
+  --bootstrap-server "$KAFKA_BROKER" \
+  --describe \
+  --group "grupo-consulta-onpe"
+\end{lstlisting}
+
+La salida muestra el \texttt{CURRENT-OFFSET}, el \texttt{LOG-END-OFFSET} y el \texttt{LAG}, lo que permite verificar cuantos mensajes fueron consumidos por el grupo.
+
+\imageplaceholder{Descripcion del consumer group mostrando offsets y lag.}{kafka_consumer_group.png}
+
+\section{Prueba desde los nodos workers}
+
+Para demostrar que los workers pueden actuar como clientes Kafka, se accedio por SSH a un worker y se ejecuto:
+
+\begin{lstlisting}[language=bash]
+/home/ec2-user/kafka_client_demo.sh onpe-votos-demo grupo-workers-onpe
+\end{lstlisting}
+
+Si se ejecuta el mismo comando en dos workers diferentes con el mismo grupo, Kafka reparte las particiones entre ambos consumidores. Esto evidencia la coordinacion propia de los \textit{Consumer Groups}.
+
+\imageplaceholder{Consumers ejecutados desde workers distintos usando el mismo Consumer Group.}{kafka_workers_consumer_group.png}
+
+\section{Eliminacion de recursos}
+
+Para evitar costos innecesarios en AWS, al finalizar el laboratorio se eliminaron las instancias creadas mediante:
+
+\begin{lstlisting}[language=bash]
+python3 src/levantar_kafka.py --delete
+\end{lstlisting}
+
+Este comando busca las instancias con la etiqueta \texttt{Proyecto=ONPE-Kafka} y las termina automaticamente.
+
+\imageplaceholder{Eliminacion de las instancias EC2 creadas para Kafka.}{kafka_delete.png}
+
+\section{Analisis}
+
+Apache Kafka funciona como una plataforma distribuida de mensajeria basada en logs. A diferencia de una cola tradicional, los mensajes no desaparecen inmediatamente al ser consumidos; permanecen almacenados en particiones y los consumidores avanzan mediante offsets.
+
+El uso de particiones permite paralelizar la lectura y escritura de datos. En este laboratorio, el topic \texttt{onpe-votos-demo} fue dividido en tres particiones, lo que permitio observar como Kafka organiza los mensajes internamente.
+
+El concepto de \textit{Consumer Group} es especialmente importante en escenarios de Big Data, ya que permite distribuir el procesamiento entre multiples consumidores. Si varios workers pertenecen al mismo grupo, Kafka asigna particiones distintas a cada uno, evitando que todos procesen exactamente los mismos mensajes.
+
+La automatizacion con \texttt{boto3} permitio crear una infraestructura reproducible sobre AWS EC2. El master quedo configurado como broker Kafka, mientras que los workers quedaron preparados como clientes para realizar pruebas de consumo.
+
+\section{Conclusiones}
+
+Se logro instalar Apache Kafka sobre instancias EC2 en AWS utilizando scripts automatizados de aprovisionamiento e inicializacion.
+
+La instancia local o inicial actuo como controlador, creando tres nodos EC2 nuevos: un master Kafka y dos workers cliente. Cada nodo fue creado con un nombre unico para facilitar su identificacion en AWS.
+
+La demostracion permitio comprobar los conceptos fundamentales de Kafka: creacion de topics, division en partitions, envio de mensajes mediante producers, lectura mediante consumers, seguimiento de offsets y coordinacion de consumidores mediante consumer groups.
+
+Finalmente, el laboratorio mostro que Kafka es una herramienta adecuada para construir sistemas distribuidos de ingestion y procesamiento de eventos, especialmente cuando se requiere escalabilidad, tolerancia a fallos y consumo paralelo de datos.
+
+\end{document}
