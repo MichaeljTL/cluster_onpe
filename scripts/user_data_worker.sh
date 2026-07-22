@@ -5,7 +5,7 @@ KAFKA_VERSION="3.7.1"
 SCALA_VERSION="2.13"
 KAFKA_HOME="/opt/kafka"
 KAFKA_TGZ="kafka_${SCALA_VERSION}-${KAFKA_VERSION}.tgz"
-KAFKA_URL="https://archive.apache.org/dist/kafka/${KAFKA_VERSION}/${KAFKA_TGZ}"
+KAFKA_URL="https://dlcdn.apache.org/kafka/${KAFKA_VERSION}/${KAFKA_TGZ}"
 
 if [ -z "${KAFKA_BROKER_IP:-}" ]; then
   echo "KAFKA_BROKER_IP no fue definido por src/levantar_kafka.py" >&2
@@ -16,7 +16,7 @@ yum update -y
 yum install -y java-11-amazon-corretto-headless wget tar nmap-ncat
 
 cd /opt
-wget -q "$KAFKA_URL"
+wget -nv --tries=5 --timeout=60 "$KAFKA_URL"
 tar -xzf "$KAFKA_TGZ"
 mv "kafka_${SCALA_VERSION}-${KAFKA_VERSION}" kafka
 rm -f "$KAFKA_TGZ"

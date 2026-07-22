@@ -8,8 +8,8 @@ KAFKA_HOME="/opt/kafka"
 FLINK_HOME="/opt/flink"
 KAFKA_TGZ="kafka_${KAFKA_SCALA_VERSION}-${KAFKA_VERSION}.tgz"
 FLINK_TGZ="flink-${FLINK_VERSION}-bin-scala_2.12.tgz"
-KAFKA_URL="https://archive.apache.org/dist/kafka/${KAFKA_VERSION}/${KAFKA_TGZ}"
-FLINK_URL="https://archive.apache.org/dist/flink/flink-${FLINK_VERSION}/${FLINK_TGZ}"
+KAFKA_URL="https://dlcdn.apache.org/kafka/${KAFKA_VERSION}/${KAFKA_TGZ}"
+FLINK_URL="https://dlcdn.apache.org/flink/flink-${FLINK_VERSION}/${FLINK_TGZ}"
 BROKER_HOST="$(hostname -I | awk '{print $1}')"
 CLUSTER_ID="ONPEKafkaFlinkLab07"
 
@@ -17,12 +17,12 @@ yum update -y
 yum install -y java-11-amazon-corretto-headless wget tar nmap-ncat python3 maven
 
 cd /opt
-wget -q "$KAFKA_URL"
+wget -nv --tries=5 --timeout=60 "$KAFKA_URL"
 tar -xzf "$KAFKA_TGZ"
 mv "kafka_${KAFKA_SCALA_VERSION}-${KAFKA_VERSION}" kafka
 rm -f "$KAFKA_TGZ"
 
-wget -q "$FLINK_URL"
+wget -nv --tries=5 --timeout=60 "$FLINK_URL"
 tar -xzf "$FLINK_TGZ"
 mv "flink-${FLINK_VERSION}" flink
 rm -f "$FLINK_TGZ"
