@@ -5,7 +5,7 @@ KAFKA_VERSION="3.9.2"
 SCALA_VERSION="2.13"
 KAFKA_HOME="/opt/kafka"
 KAFKA_TGZ="kafka_${SCALA_VERSION}-${KAFKA_VERSION}.tgz"
-KAFKA_URL="https://dlcdn.apache.org/kafka/${KAFKA_VERSION}/${KAFKA_TGZ}"
+KAFKA_URL="https://downloads.apache.org/kafka/${KAFKA_VERSION}/${KAFKA_TGZ}"
 BROKER_HOST="$(hostname -I | awk '{print $1}')"
 CLUSTER_ID="ONPEKafkaCluster01"
 
