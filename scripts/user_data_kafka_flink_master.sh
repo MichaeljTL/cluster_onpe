@@ -22,7 +22,7 @@ rm -f "$KAFKA_TGZ"
 mkdir -p /var/lib/kafka/kraft-combined-logs /home/ec2-user/lab7/flink-kafka-lab7/src/main/java/edu/unsa/bigdata
 chown -R ec2-user:ec2-user "$KAFKA_HOME" /var/lib/kafka /home/ec2-user/lab7
 
-cat > "$KAFKA_HOME/config/kraft/server.properties" <<EOF
+cat > "$KAFKA_HOME/config/server.properties" <<EOF
 process.roles=broker,controller
 node.id=1
 controller.quorum.voters=1@${BROKER_HOST}:9093
@@ -43,7 +43,7 @@ EOF
 sudo -u ec2-user "$KAFKA_HOME/bin/kafka-storage.sh" format \
   --ignore-formatted \
   --cluster-id "$CLUSTER_ID" \
-  --config "$KAFKA_HOME/config/kraft/server.properties"
+  --config "$KAFKA_HOME/config/server.properties"
 
 cat > /etc/systemd/system/kafka.service <<EOF
 [Unit]
@@ -56,7 +56,7 @@ Type=simple
 User=ec2-user
 Group=ec2-user
 Environment=JAVA_HOME=/usr/lib/jvm/java-11-amazon-corretto.x86_64
-ExecStart=${KAFKA_HOME}/bin/kafka-server-start.sh ${KAFKA_HOME}/config/kraft/server.properties
+ExecStart=${KAFKA_HOME}/bin/kafka-server-start.sh ${KAFKA_HOME}/config/server.properties
 ExecStop=${KAFKA_HOME}/bin/kafka-server-stop.sh
 Restart=on-failure
 RestartSec=10
