@@ -1,15 +1,11 @@
 #!/usr/bin/env bash
 set -euxo pipefail
 
-KAFKA_VERSION="3.7.1"
+KAFKA_VERSION="3.9.2"
 KAFKA_SCALA_VERSION="2.13"
-FLINK_VERSION="1.19.1"
 KAFKA_HOME="/opt/kafka"
-FLINK_HOME="/opt/flink"
 KAFKA_TGZ="kafka_${KAFKA_SCALA_VERSION}-${KAFKA_VERSION}.tgz"
-FLINK_TGZ="flink-${FLINK_VERSION}-bin-scala_2.12.tgz"
 KAFKA_URL="https://dlcdn.apache.org/kafka/${KAFKA_VERSION}/${KAFKA_TGZ}"
-FLINK_URL="https://dlcdn.apache.org/flink/flink-${FLINK_VERSION}/${FLINK_TGZ}"
 BROKER_HOST="$(hostname -I | awk '{print $1}')"
 CLUSTER_ID="ONPEKafkaFlinkLab07"
 
@@ -22,13 +18,9 @@ tar -xzf "$KAFKA_TGZ"
 mv "kafka_${KAFKA_SCALA_VERSION}-${KAFKA_VERSION}" kafka
 rm -f "$KAFKA_TGZ"
 
-wget -nv --tries=5 --timeout=60 "$FLINK_URL"
-tar -xzf "$FLINK_TGZ"
-mv "flink-${FLINK_VERSION}" flink
-rm -f "$FLINK_TGZ"
 
 mkdir -p /var/lib/kafka/kraft-combined-logs /home/ec2-user/lab7/flink-kafka-lab7/src/main/java/edu/unsa/bigdata
-chown -R ec2-user:ec2-user "$KAFKA_HOME" "$FLINK_HOME" /var/lib/kafka /home/ec2-user/lab7
+chown -R ec2-user:ec2-user "$KAFKA_HOME" /var/lib/kafka /home/ec2-user/lab7
 
 cat > "$KAFKA_HOME/config/kraft/server.properties" <<EOF
 process.roles=broker,controller
@@ -80,8 +72,7 @@ systemctl enable --now kafka
 cat > /home/ec2-user/.bash_profile <<EOF
 export JAVA_HOME=/usr/lib/jvm/java-11-amazon-corretto.x86_64
 export KAFKA_HOME=${KAFKA_HOME}
-export FLINK_HOME=${FLINK_HOME}
-export PATH=\$KAFKA_HOME/bin:\$FLINK_HOME/bin:\$PATH
+export PATH=\$KAFKA_HOME/bin:\$PATH
 export KAFKA_BROKER=${BROKER_HOST}:9092
 EOF
 chown ec2-user:ec2-user /home/ec2-user/.bash_profile

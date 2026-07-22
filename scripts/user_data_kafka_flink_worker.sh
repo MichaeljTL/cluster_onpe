@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euxo pipefail
 
-KAFKA_VERSION="3.7.1"
+KAFKA_VERSION="3.9.2"
 KAFKA_SCALA_VERSION="2.13"
 KAFKA_HOME="/opt/kafka"
 KAFKA_TGZ="kafka_${KAFKA_SCALA_VERSION}-${KAFKA_VERSION}.tgz"
