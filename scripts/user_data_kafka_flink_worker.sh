@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euxo pipefail
 
-KAFKA_VERSION="3.9.2"
+KAFKA_VERSION="4.3.1"
 KAFKA_SCALA_VERSION="2.13"
 KAFKA_HOME="/opt/kafka"
 KAFKA_TGZ="kafka_${KAFKA_SCALA_VERSION}-${KAFKA_VERSION}.tgz"
-KAFKA_URL="https://downloads.apache.org/kafka/${KAFKA_VERSION}/${KAFKA_TGZ}"
+KAFKA_URL="https://dlcdn.apache.org/kafka/${KAFKA_VERSION}/${KAFKA_TGZ}"
 
 if [ -z "${KAFKA_BROKER_IP:-}" ]; then
   echo "KAFKA_BROKER_IP no fue definido por src/levantar_kafka_flink.py" >&2
